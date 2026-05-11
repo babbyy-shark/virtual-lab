@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --lab-bg:      #0a0a0f;
+  --lab-surface: #12121a;
+  --lab-border:  #2a2a3a;
+  --lab-accent:  #00e5a0;
+  --lab-danger:  #ff4466;
+  --lab-warning: #ffaa00;
+  --lab-info:    #4488ff;
+  --lab-text:    #e8e8f0;
+  --lab-muted:   #8888a0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--lab-bg);
+  color: var(--lab-text);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--lab-bg); }
+::-webkit-scrollbar-thumb { background: var(--lab-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--lab-muted); }
+
+/* Range inputs */
+input[type="range"] { accent-color: var(--lab-accent); }
+
+canvas { display: block; }

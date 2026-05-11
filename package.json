@@ -1,0 +1,16 @@
+{
+  "name": "virtual-lab",
+  "version": "0.1.0",
+  "description": "A collaborative 2D physics sandbox for university-level learning",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "client": "cd client && npm run dev",
+    "server": "cd server && npm run dev",
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "build": "cd client && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
