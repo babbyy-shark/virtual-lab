@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+/**
+ * components/AnalyticsDashboard.jsx
+ * Phase 3 — FIXED version
+ *
+ * ✅ Bug 1 fixed: no interval = no memory leak
+ * ✅ Bug 2 fixed: use `data` prop directly, no stale closure
+ */
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Legend, CartesianGrid,
+  ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 
 const COLORS = {
@@ -59,16 +65,10 @@ function MiniChart({ title, data, lines }) {
 }
 
 export default function AnalyticsDashboard({ data, bodies }) {
-
-  const [frozenData, setFrozenData] = useState([])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFrozenData(data)
-    }, 500)
-  }, [])
-
-  const last = frozenData[frozenData.length - 1]
+  // ✅ No useState, no useEffect, no interval
+  // React automatically re-renders this component
+  // whenever the parent sends new `data` down as a prop
+  const last = data[data.length - 1]
 
   return (
     <div style={{
@@ -81,7 +81,7 @@ export default function AnalyticsDashboard({ data, bodies }) {
         📈 ANALYTICS
       </div>
 
-      {frozenData.length === 0 ? (
+      {data.length === 0 ? (
         <div style={{
           padding: 12, background: '#0a0a0f', borderRadius: 8,
           border: '1px solid #2a2a3a', color: '#8888a0', lineHeight: 1.6,
@@ -92,7 +92,7 @@ export default function AnalyticsDashboard({ data, bodies }) {
         <>
           <MiniChart
             title="Energy (J)"
-            data={frozenData}
+            data={data}
             lines={[
               { key: 'ke',    name: 'KE',    color: COLORS.ke    },
               { key: 'pe',    name: 'PE',    color: COLORS.pe    },
@@ -101,11 +101,10 @@ export default function AnalyticsDashboard({ data, bodies }) {
           />
           <MiniChart
             title="Max Speed (px/s)"
-            data={frozenData}
+            data={data}
             lines={[{ key: 'maxSpeed', name: 'Speed', color: COLORS.maxSpeed }]}
           />
 
-          {/* Live values */}
           {last && (
             <div style={{
               padding: 10, background: '#0a0a0f', borderRadius: 8,
@@ -128,7 +127,6 @@ export default function AnalyticsDashboard({ data, bodies }) {
             </div>
           )}
 
-          {/* Body table */}
           {bodies?.length > 0 && (
             <div style={{ marginTop: 4 }}>
               <div style={{ fontSize: 9, fontWeight: 700, color: '#8888a0', letterSpacing: 2, marginBottom: 6 }}>

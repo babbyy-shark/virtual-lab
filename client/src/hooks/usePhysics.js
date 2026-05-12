@@ -53,29 +53,43 @@ export default function usePhysics(canvasRef, containerRef) {
     render.mouse = mouse
 
     // Body count tracking
-    Events.on(engine, 'afterUpdate', () => {
-      const dynamicBodies = Composite.allBodies(engine.world).filter(b => !b.isStatic)
-      setBodyCount(dynamicBodies.length)
+let lastAnalyticsTime = 0
 
-      if (dynamicBodies.length > 0) {
-        const totalKE  = dynamicBodies.reduce((s, b) => s + getBodyKE(b), 0)
-        const totalPE  = dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30), 0)
-        const maxSpeed = Math.max(...dynamicBodies.map(b => b.speed))
+Events.on(engine, 'afterUpdate', () => {
+  const dynamicBodies = Composite.allBodies(engine.world)
+    .filter(b => !b.isStatic)
+  setBodyCount(dynamicBodies.length)
 
-        setAnalyticsData(prev => [...prev.slice(-100), {
-          t:        Date.now(),
-          ke:       +totalKE.toFixed(2),
-          pe:       +totalPE.toFixed(2),
-          total:    +(totalKE + totalPE).toFixed(2),
-          maxSpeed: +maxSpeed.toFixed(2),
-        }])
+  const now = Date.now()
 
-        setLiveBodies([...dynamicBodies])
-      }
+  if (dynamicBodies.length > 0 && now - lastAnalyticsTime > 200) {
+    lastAnalyticsTime = now
 
-      const ctx = render.canvas.getContext('2d')
-      drawForceVectors(ctx, dynamicBodies)
-    })
+    const totalKE  = dynamicBodies.reduce((s, b) => s + getBodyKE(b), 0)
+    const totalPE  = dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30), 0)
+    const maxSpeed = Math.max(...dynamicBodies.map(b => b.speed))
+
+    setAnalyticsData(prev => [...prev.slice(-100), {
+      t:        now,
+      ke:       +totalKE.toFixed(2),
+      pe:       +totalPE.toFixed(2),
+      total:    +(totalKE + totalPE).toFixed(2),
+      maxSpeed: +maxSpeed.toFixed(2),
+    }])
+
+    setLiveBodies([...dynamicBodies])
+  }
+
+})
+
+// ✅ Draw AFTER Matter.js renders, not during physics step
+Events.on(render, 'afterRender', () => {
+  if (!playingRef.current) return
+  const dynamicBodies = Composite.allBodies(engine.world)
+    .filter(b => !b.isStatic)
+  const ctx = render.canvas.getContext('2d')
+  drawForceVectors(ctx, dynamicBodies)
+})
 
     Render.run(render)
     Runner.run(runner, engine)
