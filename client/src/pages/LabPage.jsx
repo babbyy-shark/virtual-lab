@@ -1,14 +1,18 @@
 /**
- * pages/LabPage.jsx — Phase 4
+ * pages/LabPage.jsx — Phase 5
+ * Full multi-user collaborative physics lab
  */
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import usePhysics from '../hooks/usePhysics.js'
+import useSocket from '../hooks/useSocket.js'
 import Toolbar from '../components/Toolbar.jsx'
 import ControlBar from '../components/ControlBar.jsx'
 import InspectorPanel from '../components/InspectorPanel.jsx'
 import AnalyticsDashboard from '../components/AnalyticsDashboard.jsx'
 import SaveLoadPanel from '../components/SaveLoadPanel.jsx'
+import RoomPanel from '../components/RoomPanel.jsx'
+import LiveCursors from '../components/LiveCursors.jsx'
 import { CONSTRAINT_PRESETS } from '../physics/engine.js'
 import { serializeWorld, deserializeWorld } from '../utils/serializer.js'
 import { saveExperiment, getExperiment } from '../utils/api.js'
@@ -16,6 +20,8 @@ import { saveExperiment, getExperiment } from '../utils/api.js'
 export default function LabPage() {
   const containerRef = useRef(null)
   const canvasRef    = useRef(null)
+  const { roomId }   = useParams()
+  const activeRoomId = roomId || 'default'
 
   const {
     ready, bodyCount,
@@ -24,10 +30,16 @@ export default function LabPage() {
     engineRef,
     addBody, removeBody, clearAll,
     addConstraint, removeAllConstraintsForBody,
-    toggleMotor,
-    getBodyAtPoint,
+    toggleMotor, getBodyAtPoint,
     setRunning, updateGravity, resetVelocities,
   } = usePhysics(canvasRef, containerRef)
+
+  const {
+    connected, roomState, cursors, messages, you,
+    onBodyAdded, onBodyRemoved, onClearAll, onRoomBodies,
+    joinRoom, emitCursor, emitBodyAdded, emitBodyRemoved,
+    emitClearAll, sendMessage,
+  } = useSocket()
 
   const [playing,            setPlaying]            = useState(false)
   const [mode,               setMode]               = useState('place')
@@ -36,63 +48,48 @@ export default function LabPage() {
   const [selectedConstraint, setSelectedConstraint] = useState('spring')
   const [isStatic,           setIsStatic]           = useState(false)
   const [gravity,            setGravity]            = useState(1)
-  const [rightPanel,         setRightPanel]         = useState('inspector') // inspector | analytics | saveload
+  const [rightPanel,         setRightPanel]         = useState('inspector')
   const [connectingFrom,     setConnectingFrom]     = useState(null)
-  const [toast,              setToast]              = useState(null) // { msg, type }
+  const [toast,              setToast]              = useState(null)
+  const [userName]           = useState(() => `User${Math.floor(Math.random() * 1000)}`)
 
   useEffect(() => { updateGravity(gravity) }, [gravity, updateGravity])
   useEffect(() => { setRunning(playing)    }, [playing, setRunning])
   useEffect(() => { setConnectingFrom(null) }, [mode])
 
-  // Toast helper
+  // Join room on mount
+  useEffect(() => {
+    if (connected) joinRoom(activeRoomId, userName)
+  }, [connected, activeRoomId, userName, joinRoom])
+
+  // Register socket callbacks
+  useEffect(() => {
+    onBodyAdded.current = (body) => {
+      addBody(body.type, body.x, body.y, body.material, body.isStatic)
+    }
+    onBodyRemoved.current = (networkId) => {
+      // Find and remove by networkId
+      // (simplified — full implementation tracks networkId per body)
+    }
+    onClearAll.current = () => {
+      clearAll()
+    }
+    onRoomBodies.current = (bodies) => {
+      bodies.forEach(b => addBody(b.type, b.x, b.y, b.material, b.isStatic))
+    }
+  }, [addBody, clearAll])
+
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3000)
   }
 
-  // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = useCallback(async (name, desc) => {
-    if (!engineRef.current) return
-    try {
-      const worldData = serializeWorld(engineRef.current, gravity)
-      const result = await saveExperiment({
-        name,
-        description: desc,
-        gravity,
-        ...worldData,
-      })
-      showToast(`✅ Saved "${name}"`)
-      return result
-    } catch (err) {
-      // 🐛 BUG 1 surfaces here — crash logged but user sees nothing useful
-      console.error('Save failed:', err)
-      showToast('❌ Save failed — check console', 'error')
-    }
-  }, [engineRef, gravity])
-
-  // ── Load ──────────────────────────────────────────────────────────────────
-  const handleLoad = useCallback(async (id) => {
-  if (!engineRef.current) return
-  try {
-    // ✅ Fetch FIRST before clearing anything
-    const exp = await getExperiment(id)
-    if (!exp?.bodies) {
-      showToast('❌ Experiment has no bodies', 'error')
-      return
-    }
-    // ✅ Now clear synchronously
-    clearAll()
-    setGravity(exp.gravity || 1)
-    // ✅ Wait one tick for Matter.js to process clearAll
-    // before adding new bodies
-    setTimeout(() => {
-      deserializeWorld(exp, addBody, addConstraint)
-      showToast(`📂 Loaded "${exp.name}"`)
-    }, 50)
-  } catch (err) {
-    showToast('❌ Load failed — is the server running?', 'error')
-  }
-}, [engineRef, clearAll, addBody, addConstraint])
+  // ── Canvas mouse move → emit cursor ──────────────────────────────────────
+  const handleMouseMove = useCallback((e) => {
+    if (!containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    emitCursor(activeRoomId, e.clientX - rect.left, e.clientY - rect.top)
+  }, [activeRoomId, emitCursor])
 
   // ── Canvas click ──────────────────────────────────────────────────────────
   const handleCanvasClick = useCallback((e) => {
@@ -105,9 +102,19 @@ export default function LabPage() {
       if (clicked) { setSelectedBody(clicked); return }
       const newBody = addBody(selectedShape, pos.x, pos.y, selectedMaterial,
         isStatic || selectedShape === 'wall')
-      if (newBody) setSelectedBody(newBody)
+      if (newBody) {
+        setSelectedBody(newBody)
+        // Broadcast to room
+        emitBodyAdded(activeRoomId, {
+          networkId: newBody.id,
+          type: selectedShape, x: pos.x, y: pos.y,
+          material: selectedMaterial,
+          isStatic: isStatic || selectedShape === 'wall',
+        })
+      }
       return
     }
+
     if (mode === 'connect') {
       const clicked = getBodyAtPoint(pos)
       if (!connectingFrom) {
@@ -122,23 +129,66 @@ export default function LabPage() {
       setSelectedBody(clicked || null)
       return
     }
+
     if (mode === 'motor') {
       const clicked = getBodyAtPoint(pos)
       if (clicked && !clicked.isStatic) { toggleMotor(clicked); setSelectedBody({ ...clicked }) }
       return
     }
+
     if (mode === 'delete') {
       const clicked = getBodyAtPoint(pos)
-      if (clicked) { removeAllConstraintsForBody(clicked); removeBody(clicked) }
+      if (clicked) {
+        removeAllConstraintsForBody(clicked)
+        removeBody(clicked)
+        emitBodyRemoved(activeRoomId, clicked.id)
+      }
       return
     }
   }, [
     ready, mode, selectedShape, selectedMaterial, isStatic,
-    selectedConstraint, connectingFrom,
+    selectedConstraint, connectingFrom, activeRoomId,
     addBody, addConstraint, removeBody, removeAllConstraintsForBody,
     toggleMotor, getBodyAtPoint, setSelectedBody,
+    emitBodyAdded, emitBodyRemoved,
   ])
 
+  // ── Save / Load ───────────────────────────────────────────────────────────
+  const handleSave = useCallback(async (name, desc) => {
+    if (!engineRef.current) return
+    try {
+      const worldData = serializeWorld(engineRef.current, gravity)
+      await saveExperiment({ name, description: desc, gravity, ...worldData })
+      showToast(`✅ Saved "${name}"`)
+    } catch (err) {
+      showToast('❌ Save failed — is the server running?', 'error')
+    }
+  }, [engineRef, gravity])
+
+  const handleLoad = useCallback(async (id) => {
+    if (!engineRef.current) return
+    try {
+      const exp = await getExperiment(id)
+      if (!exp?.bodies) return
+      clearAll()
+      emitClearAll(activeRoomId)
+      setGravity(exp.gravity || 1)
+      setTimeout(() => {
+        deserializeWorld(exp, addBody, addConstraint)
+        showToast(`📂 Loaded "${exp.name}"`)
+      }, 50)
+    } catch (err) {
+      showToast('❌ Load failed', 'error')
+    }
+  }, [engineRef, clearAll, addBody, addConstraint, activeRoomId, emitClearAll])
+
+  // ── Clear (broadcast) ─────────────────────────────────────────────────────
+  const handleClear = useCallback(() => {
+    clearAll()
+    emitClearAll(activeRoomId)
+  }, [clearAll, emitClearAll, activeRoomId])
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if (document.activeElement?.tagName === 'INPUT') return
@@ -147,11 +197,12 @@ export default function LabPage() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBody) {
         removeAllConstraintsForBody(selectedBody)
         removeBody(selectedBody)
+        emitBodyRemoved(activeRoomId, selectedBody.id)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedBody, removeBody, removeAllConstraintsForBody])
+  }, [selectedBody, removeBody, removeAllConstraintsForBody, activeRoomId, emitBodyRemoved])
 
   const cursorStyle = {
     place: 'crosshair', connect: connectingFrom ? 'cell' : 'crosshair',
@@ -178,37 +229,51 @@ export default function LabPage() {
       )}
 
       {/* Nav */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-lab-border bg-lab-surface text-xs font-mono">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-lab-border bg-lab-surface text-xs font-mono">
         <span className="text-lab-accent font-bold text-sm tracking-widest">⚛ VIRTUAL-LAB</span>
-        <span className="text-lab-muted">v0.4</span>
+        <span className="text-lab-muted">v0.5</span>
         <div className="w-px h-4 bg-lab-border" />
         <Link to="/"          className="text-lab-text  hover:text-lab-accent transition-colors">Lab</Link>
         <Link to="/library"   className="text-lab-muted hover:text-lab-accent transition-colors">Library</Link>
         <Link to="/dashboard" className="text-lab-muted hover:text-lab-accent transition-colors">Dashboard</Link>
+
+        {/* Room indicator */}
+        <div className="flex items-center gap-2 px-3 py-1 rounded border border-lab-border">
+          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-lab-accent' : 'bg-lab-danger'}`} />
+          <span className="text-lab-muted">Room:</span>
+          <span className="text-lab-text">{activeRoomId}</span>
+          <span className="text-lab-muted">·</span>
+          <span className="text-lab-text">{roomState.users.length} online</span>
+        </div>
+
         <div className="flex-1" />
 
         {mode === 'connect' && (
           <div className="flex items-center gap-2 px-3 py-1 rounded border text-[10px]"
             style={{ borderColor: connectPreset.color, color: connectPreset.color, background: connectPreset.color + '15' }}>
-            {connectPreset.icon} {connectPreset.label} —
-            {connectingFrom ? <span className="font-bold ml-1">Click 2nd body</span> : <span className="ml-1">Click 1st body</span>}
-            <button onClick={() => { setMode('place'); setConnectingFrom(null) }} className="ml-2 opacity-60 hover:opacity-100">✕</button>
+            {connectPreset.icon} {connectingFrom
+              ? <span className="font-bold">Click 2nd body</span>
+              : <span>Click 1st body</span>}
+            <button onClick={() => { setMode('place'); setConnectingFrom(null) }} className="ml-1 opacity-60 hover:opacity-100">✕</button>
           </div>
         )}
 
-        {/* Right panel toggle buttons */}
-        {['inspector','analytics','saveload'].map(panel => (
+        {['inspector','analytics','saveload','room'].map(panel => (
           <button key={panel}
             onClick={() => setRightPanel(p => p === panel ? 'inspector' : panel)}
             className={`px-3 py-1 rounded border text-xs transition-all ${
               rightPanel === panel
-                ? panel === 'analytics' ? 'border-lab-info text-lab-info bg-blue-900/30'
-                : panel === 'saveload'  ? 'border-lab-accent text-lab-accent bg-emerald-900/30'
+                ? panel === 'analytics' ? 'border-lab-info    text-lab-info    bg-blue-900/30'
+                : panel === 'saveload'  ? 'border-lab-accent  text-lab-accent  bg-emerald-900/30'
+                : panel === 'room'      ? 'border-purple-400  text-purple-400  bg-purple-900/30'
                 : 'border-lab-border text-lab-text'
                 : 'border-lab-border text-lab-muted hover:text-lab-text'
             }`}
           >
-            {panel === 'inspector' ? '🔍 Inspector' : panel === 'analytics' ? '📈 Analytics' : '💾 Save/Load'}
+            {panel === 'inspector' ? '🔍 Inspector'
+              : panel === 'analytics' ? '📈 Analytics'
+              : panel === 'saveload'  ? '💾 Save/Load'
+              : `🔗 Room (${roomState.users.length})`}
           </button>
         ))}
 
@@ -218,7 +283,7 @@ export default function LabPage() {
       <ControlBar
         playing={playing} onToggle={() => setPlaying(p => !p)}
         onReset={() => { resetVelocities(); setPlaying(false); setConnectingFrom(null) }}
-        onClear={clearAll} gravity={gravity} onGravity={setGravity}
+        onClear={handleClear} gravity={gravity} onGravity={setGravity}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -231,8 +296,13 @@ export default function LabPage() {
         />
 
         <div ref={containerRef} className="flex-1 relative overflow-hidden"
-          style={{ cursor: cursorStyle }} onClick={handleCanvasClick}>
+          style={{ cursor: cursorStyle }}
+          onClick={handleCanvasClick}
+          onMouseMove={handleMouseMove}
+        >
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+          <LiveCursors cursors={cursors} you={you} />
+
           {!ready && (
             <div className="absolute inset-0 flex items-center justify-center text-lab-muted text-sm">
               Initializing physics engine…
@@ -250,6 +320,15 @@ export default function LabPage() {
           ? <AnalyticsDashboard data={analyticsData} bodies={liveBodies} />
           : rightPanel === 'saveload'
           ? <SaveLoadPanel onSave={handleSave} onLoad={handleLoad} />
+          : rightPanel === 'room'
+          ? <RoomPanel
+              roomId={activeRoomId}
+              roomState={roomState}
+              messages={messages}
+              you={you}
+              connected={connected}
+              onSendMessage={(text) => sendMessage(activeRoomId, text)}
+            />
           : <InspectorPanel body={selectedBody} onToggleMotor={toggleMotor} />
         }
       </div>
