@@ -33,6 +33,10 @@ router.post('/', async (req, res) => {
     const exp = await Experiment.create(req.body)
     res.status(201).json(exp)
   } catch (err) {
+    // ✅ Handle duplicate name error specifically
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'An experiment with that name already exists' })
+    }
     res.status(400).json({ error: err.message })
   }
 })
