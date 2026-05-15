@@ -8,16 +8,13 @@ import {
   setGravity, getBodyKE, getBodyPE, queryBodyAtPoint,
 } from '../physics/engine.js'
 
-const {
-  Render, Runner, World, Composite,
-  Events, Mouse, MouseConstraint, Body,
-} = Matter
+const { Render, Runner, World, Composite, Events, Mouse, MouseConstraint, Body } = Matter
 
 export default function usePhysics(canvasRef, containerRef) {
   const engineRef  = useRef(null)
   const renderRef  = useRef(null)
   const runnerRef  = useRef(null)
-  const playingRef = useRef(false) // 🐛 BUG 4: we'll track this but not use it correctly
+  const playingRef = useRef(false)
 
   const [ready,         setReady]         = useState(false)
   const [bodyCount,     setBodyCount]     = useState(0)
@@ -35,11 +32,7 @@ export default function usePhysics(canvasRef, containerRef) {
     const render = Render.create({
       canvas: canvasRef.current,
       engine,
-      options: {
-        width: W, height: H,
-        background: '#0a0a0f',
-        wireframes: false,
-      },
+      options: { width: W, height: H, background: '#0a0a0f', wireframes: false },
     })
 
     const runner = Runner.create()
@@ -52,44 +45,35 @@ export default function usePhysics(canvasRef, containerRef) {
     World.add(engine.world, mouseConstraint)
     render.mouse = mouse
 
-    // Body count tracking
-let lastAnalyticsTime = 0
+    let lastAnalyticsTime = 0
 
-Events.on(engine, 'afterUpdate', () => {
-  const dynamicBodies = Composite.allBodies(engine.world)
-    .filter(b => !b.isStatic)
-  setBodyCount(dynamicBodies.length)
+    Events.on(engine, 'afterUpdate', () => {
+      const dynamicBodies = Composite.allBodies(engine.world).filter(b => !b.isStatic)
+      setBodyCount(dynamicBodies.length)
 
-  const now = Date.now()
+      const now = Date.now()
+      if (dynamicBodies.length > 0 && now - lastAnalyticsTime > 200) {
+        lastAnalyticsTime = now
+        const totalKE  = dynamicBodies.reduce((s, b) => s + getBodyKE(b), 0)
+        const totalPE  = dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30), 0)
+        const maxSpeed = Math.max(...dynamicBodies.map(b => b.speed))
+        setAnalyticsData(prev => [...prev.slice(-100), {
+          t:        now,
+          ke:       +totalKE.toFixed(2),
+          pe:       +totalPE.toFixed(2),
+          total:    +(totalKE + totalPE).toFixed(2),
+          maxSpeed: +maxSpeed.toFixed(2),
+        }])
+        setLiveBodies([...dynamicBodies])
+      }
+    })
 
-  if (dynamicBodies.length > 0 && now - lastAnalyticsTime > 200) {
-    lastAnalyticsTime = now
-
-    const totalKE  = dynamicBodies.reduce((s, b) => s + getBodyKE(b), 0)
-    const totalPE  = dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30), 0)
-    const maxSpeed = Math.max(...dynamicBodies.map(b => b.speed))
-
-    setAnalyticsData(prev => [...prev.slice(-100), {
-      t:        now,
-      ke:       +totalKE.toFixed(2),
-      pe:       +totalPE.toFixed(2),
-      total:    +(totalKE + totalPE).toFixed(2),
-      maxSpeed: +maxSpeed.toFixed(2),
-    }])
-
-    setLiveBodies([...dynamicBodies])
-  }
-
-})
-
-// ✅ Draw AFTER Matter.js renders, not during physics step
-Events.on(render, 'afterRender', () => {
-  if (!playingRef.current) return
-  const dynamicBodies = Composite.allBodies(engine.world)
-    .filter(b => !b.isStatic)
-  const ctx = render.canvas.getContext('2d')
-  drawForceVectors(ctx, dynamicBodies)
-})
+    Events.on(render, 'afterRender', () => {
+      if (!playingRef.current) return
+      const dynamicBodies = Composite.allBodies(engine.world).filter(b => !b.isStatic)
+      const ctx = render.canvas.getContext('2d')
+      drawForceVectors(ctx, dynamicBodies)
+    })
 
     Render.run(render)
     Runner.run(runner, engine)
@@ -111,35 +95,28 @@ Events.on(render, 'afterRender', () => {
 
   function drawForceVectors(ctx, bodies) {
     bodies.forEach(body => {
-      const { x, y } = body.position
       const speed = body.speed
-
       if (speed < 0.5) return
-
-      const vx = body.velocity.x
-      const vy = body.velocity.y
-      const scale = Math.min(speed * 3, 80)
-      const len   = Math.sqrt(vx * vx + vy * vy)
+      const { x, y } = body.position
+      const vx  = body.velocity.x
+      const vy  = body.velocity.y
+      const len = Math.sqrt(vx * vx + vy * vy)
       if (len === 0) return
+      const nx    = vx / len
+      const ny    = vy / len
+      const scale = Math.min(speed * 3, 80)
+      const ax    = x + nx * scale
+      const ay    = y + ny * scale
+      const angle = Math.atan2(ny, nx)
 
-      const nx = vx / len
-      const ny = vy / len
-
-      // Draw velocity arrow
       ctx.save()
       ctx.strokeStyle = '#00e5a080'
       ctx.fillStyle   = '#00e5a0'
       ctx.lineWidth   = 2
-
       ctx.beginPath()
       ctx.moveTo(x, y)
-      ctx.lineTo(x + nx * scale, y + ny * scale)
+      ctx.lineTo(ax, ay)
       ctx.stroke()
-
-      // Arrowhead
-      const angle = Math.atan2(ny, nx)
-      const ax = x + nx * scale
-      const ay = y + ny * scale
       ctx.beginPath()
       ctx.moveTo(ax, ay)
       ctx.lineTo(ax - 8 * Math.cos(angle - 0.4), ay - 8 * Math.sin(angle - 0.4))
@@ -149,8 +126,6 @@ Events.on(render, 'afterRender', () => {
       ctx.restore()
     })
   }
-
-  // ── Body actions ──────────────────────────────────────────────────────────
 
   const addBody = useCallback((type, x, y, material, isStatic) => {
     if (!engineRef.current) return null
@@ -179,8 +154,6 @@ Events.on(render, 'afterRender', () => {
     setLiveBodies([])
   }, [])
 
-  // ── Constraint actions ────────────────────────────────────────────────────
-
   const addConstraint = useCallback((type, bodyA, bodyB = null, pointB = null) => {
     if (!engineRef.current || !bodyA) return null
     const c = _createConstraint(type, bodyA, bodyB, pointB)
@@ -195,12 +168,10 @@ Events.on(render, 'afterRender', () => {
 
   const removeAllConstraintsForBody = useCallback((body) => {
     if (!engineRef.current || !body) return
-    const constraints = Composite.allConstraints(engineRef.current.world)
+    Composite.allConstraints(engineRef.current.world)
       .filter(c => c.bodyA?.id === body.id || c.bodyB?.id === body.id)
-    constraints.forEach(c => World.remove(engineRef.current.world, c))
+      .forEach(c => World.remove(engineRef.current.world, c))
   }, [])
-
-  // ── Motor ─────────────────────────────────────────────────────────────────
 
   const toggleMotor = useCallback((body, speed = 0.06) => {
     if (!body) return
@@ -209,20 +180,14 @@ Events.on(render, 'afterRender', () => {
     setSelectedBody(b => b?.id === body.id ? { ...body } : b)
   }, [])
 
-  // ── Query ─────────────────────────────────────────────────────────────────
-
   const getBodyAtPoint = useCallback((point) => {
     if (!engineRef.current) return null
     return queryBodyAtPoint(engineRef.current, point)
   }, [])
 
-  // ── Engine controls ───────────────────────────────────────────────────────
-
   const setRunning = useCallback((running) => {
     playingRef.current = running
-    if (engineRef.current) {
-      engineRef.current.timing.timeScale = running ? 1 : 0
-    }
+    if (engineRef.current) engineRef.current.timing.timeScale = running ? 1 : 0
   }, [])
 
   const updateGravity = useCallback((y) => {
@@ -245,8 +210,7 @@ Events.on(render, 'afterRender', () => {
     analyticsData, liveBodies,
     addBody, removeBody, clearAll,
     addConstraint, removeConstraint, removeAllConstraintsForBody,
-    toggleMotor,
-    getBodyAtPoint,
+    toggleMotor, getBodyAtPoint,
     setRunning, updateGravity, resetVelocities,
   }
 }

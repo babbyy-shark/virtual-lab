@@ -73,13 +73,15 @@ export default function roomSocket(io) {
       console.log(`👤 ${user.name} joined room ${roomId} (${room.users.size} users)`)
     })
 
+    // 🐛 BUG: cursor-move broadcasts to ALL including sender
+    // causes sender's own cursor to flicker/echo back
+    // Fix: change io.to() to socket.to() to exclude sender
     socket.on('cursor-move', ({ roomId, x, y }) => {
       const room = rooms.get(roomId)
       if (!room) return
       const user = room.users.get(socket.id)
       if (user) user.cursor = { x, y }
-      // ✅ socket.to() excludes the sender
-      socket.to(roomId).emit('cursor-move', { id: socket.id, x, y })
+      io.to(roomId).emit('cursor-move', { id: socket.id, x, y })
     })
 
     socket.on('body-added', ({ roomId, body }) => {

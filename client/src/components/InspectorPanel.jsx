@@ -1,6 +1,3 @@
-/**
- * components/InspectorPanel.jsx — Phase 2: adds motor toggle button
- */
 import { MATERIAL_PRESETS } from '../physics/engine.js'
 
 function Stat({ label, value, unit, accent }) {
@@ -39,21 +36,21 @@ export default function InspectorPanel({ body, onToggleMotor }) {
         <div className="mt-2 text-lab-text font-semibold mb-1">KEYBOARD</div>
         <div>SPACE — play / pause</div>
         <div>DEL — delete selected</div>
+        <div>ESC — cancel action</div>
       </div>
     </div>
   )
 
-  const mat      = body.plugin?.material || 'steel'
-  const matPreset= MATERIAL_PRESETS[mat] || MATERIAL_PRESETS.steel
-  const vel      = body.speed || 0
-  const ke       = +(0.5 * body.mass * vel * vel).toFixed(2)
-  const isMotor  = body.plugin?.isMotor || false
+  const mat       = body.plugin?.material || 'steel'
+  const matPreset = MATERIAL_PRESETS[mat] || MATERIAL_PRESETS.steel
+  const vel       = body.speed || 0
+  const ke        = +(0.5 * body.mass * vel * vel).toFixed(2)
+  const isMotor   = body.plugin?.isMotor || false
 
   return (
     <div className="w-52 bg-lab-surface border-l border-lab-border p-3 flex flex-col gap-2 font-mono text-[10px] overflow-y-auto">
       <div className="text-lab-accent font-bold tracking-widest uppercase text-[11px]">Inspector</div>
 
-      {/* Identity */}
       <div className="p-2.5 rounded-lg border" style={{ borderColor: matPreset.color + '50', background: matPreset.color + '10' }}>
         <div className="flex items-center gap-2 mb-1">
           <div className="w-3 h-3 rounded-sm" style={{ background: matPreset.color }} />
@@ -63,7 +60,6 @@ export default function InspectorPanel({ body, onToggleMotor }) {
         <Stat label="Motor"  value={isMotor ? 'RUNNING' : 'OFF'} accent={isMotor} />
       </div>
 
-      {/* Motor control */}
       {!body.isStatic && (
         <button
           onClick={() => onToggleMotor && onToggleMotor(body)}
@@ -84,15 +80,15 @@ export default function InspectorPanel({ body, onToggleMotor }) {
       </Section>
 
       <Section title="Dynamics">
-        <Stat label="Speed" value={vel.toFixed(2)}                     unit="px/s" accent={vel > 5} />
-        <Stat label="Vx"    value={(body.velocity?.x || 0).toFixed(2)} unit="px/s" />
-        <Stat label="Vy"    value={(body.velocity?.y || 0).toFixed(2)} unit="px/s" />
-        <Stat label="ω"     value={(body.angularVelocity || 0).toFixed(3)} unit="r/s" />
+        <Stat label="Speed" value={vel.toFixed(2)}                         unit="px/s" accent={vel > 5} />
+        <Stat label="Vx"    value={(body.velocity?.x || 0).toFixed(2)}     unit="px/s" />
+        <Stat label="Vy"    value={(body.velocity?.y || 0).toFixed(2)}     unit="px/s" />
+        <Stat label="ω"     value={(body.angularVelocity || 0).toFixed(3)} unit="r/s"  />
       </Section>
 
       <Section title="Energy">
-        <Stat label="KE"   value={ke}                    unit="J" accent />
-        <Stat label="Mass" value={body.mass?.toFixed(3)} unit="kg" />
+        <Stat label="KE"   value={ke}                     unit="J" accent />
+        <Stat label="Mass" value={body.mass?.toFixed(3)}  unit="kg" />
       </Section>
 
       <Section title="Material">

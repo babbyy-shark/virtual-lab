@@ -1,7 +1,3 @@
-/**
- * models/Experiment.js
- * Saved physics experiment (world snapshot)
- */
 import mongoose from 'mongoose'
 
 const bodySchema = new mongoose.Schema({
@@ -14,7 +10,7 @@ const bodySchema = new mongoose.Schema({
 })
 
 const experimentSchema = new mongoose.Schema({
-  name:        { type: String, required: true, trim: true, unique: true },
+  name:        { type: String, required: true, trim: true },
   description: { type: String, default: '' },
   author:      { type: String, default: 'anonymous' },
   bodies:      [bodySchema],

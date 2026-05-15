@@ -1,12 +1,8 @@
-/**
- * routes/experiments.js
- */
 import { Router } from 'express'
 import Experiment from '../models/Experiment.js'
 
 const router = Router()
 
-// GET all public experiments
 router.get('/', async (req, res) => {
   try {
     const experiments = await Experiment.find({ isPublic: true }).sort({ createdAt: -1 }).limit(50)
@@ -16,7 +12,6 @@ router.get('/', async (req, res) => {
   }
 })
 
-// GET one experiment
 router.get('/:id', async (req, res) => {
   try {
     const exp = await Experiment.findById(req.params.id)
@@ -27,21 +22,16 @@ router.get('/:id', async (req, res) => {
   }
 })
 
-// POST create experiment
 router.post('/', async (req, res) => {
   try {
     const exp = await Experiment.create(req.body)
     res.status(201).json(exp)
   } catch (err) {
-    // ✅ Handle duplicate name error specifically
-    if (err.code === 11000) {
-      return res.status(400).json({ error: 'An experiment with that name already exists' })
-    }
+    if (err.code === 11000) return res.status(400).json({ error: 'An experiment with that name already exists' })
     res.status(400).json({ error: err.message })
   }
 })
 
-// DELETE experiment
 router.delete('/:id', async (req, res) => {
   try {
     await Experiment.findByIdAndDelete(req.params.id)
