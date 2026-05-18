@@ -56,7 +56,10 @@ export default function usePhysics(canvasRef, containerRef) {
       if (dynamicBodies.length > 0 && now - lastAnalyticsTime > 200) {
         lastAnalyticsTime = now
         const totalKE  = dynamicBodies.reduce((s, b) => s + getBodyKE(b), 0)
-        const totalPE  = dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30), 0)
+        const currentGravity = engineRef.current?.gravity?.y ?? 1
+        const totalPE = currentGravity <= 0
+          ? 0
+          : dynamicBodies.reduce((s, b) => s + getBodyPE(b, H - 30, currentGravity), 0)
         const maxSpeed = Math.max(...dynamicBodies.map(b => b.speed))
         setAnalyticsData(prev => [...prev.slice(-100), {
           t:        now,
@@ -235,14 +238,15 @@ export default function usePhysics(canvasRef, containerRef) {
   }, [])
 
   const resetVelocities = useCallback(() => {
-    if (!engineRef.current) return
-    Composite.allBodies(engineRef.current.world)
-      .filter(b => !b.isStatic)
-      .forEach(b => {
-        Body.setVelocity(b, { x: 0, y: 0 })
-        Body.setAngularVelocity(b, 0)
-      })
-  }, [])
+  if (!engineRef.current) return
+  Composite.allBodies(engineRef.current.world)
+    .filter(b => !b.isStatic)
+    .forEach(b => {
+      stopMotor(b)
+      Body.setVelocity(b, { x: 0, y: 0 })
+      Body.setAngularVelocity(b, 0)
+    })
+}, [])
 
   const moveBodyByNetworkId = useCallback((networkId, x, y, angle) => {
     if (!engineRef.current) return

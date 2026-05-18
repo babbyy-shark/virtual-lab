@@ -88,7 +88,7 @@ export default function InspectorPanel({ body, onToggleMotor }) {
 
       <Section title="Energy">
         <Stat label="KE"   value={ke}                     unit="J" accent />
-        <Stat label="Mass" value={body.mass?.toFixed(3)}  unit="kg" />
+        <Stat label="Mass" value={body.isStatic ? 'Fixed' : body.mass?.toFixed(3)} unit={body.isStatic ? '' : 'kg'} />
       </Section>
 
       <Section title="Material">

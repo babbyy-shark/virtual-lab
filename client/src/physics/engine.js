@@ -106,8 +106,8 @@ export function getBodyKE(body) {
   return 0.5 * body.mass * body.speed * body.speed
 }
 
-export function getBodyPE(body, groundY) {
-  return body.mass * 9.81 * Math.max(0, groundY - body.position.y) * 0.01
+export function getBodyPE(body, groundY, gravity = 1) {
+  return body.mass * gravity * 9.81 * Math.max(0, groundY - body.position.y) * 0.01
 }
 
 export function queryBodyAtPoint(engine, point) {
