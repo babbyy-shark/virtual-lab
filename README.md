@@ -2,11 +2,7 @@
 
 > A collaborative 2D physics sandbox for university-level learning.
 
-![Version](https://img.shields.io/badge/version-1.0.0-00e5a0)
-![React](https://img.shields.io/badge/React-18-blue)
-![Matter.js](https://img.shields.io/badge/Matter.js-0.19-orange)
-![Socket.io](https://img.shields.io/badge/Socket.io-4.7-white)
-![MongoDB](https://img.shields.io/badge/MongoDB-8.x-green)
+
 
 VIRTUAL-LAB addresses the gap between theoretical physics equations and physical intuition. Instead of watching a video about a pendulum, you build one, run it, and watch the energy graphs update live — together with your classmates in real time.
 
