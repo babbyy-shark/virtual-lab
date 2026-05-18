@@ -91,12 +91,12 @@ npm run dev
 
 ## Development Roadmap
 
-| Phase | Feature | Status |
-|-------|---------|--------|
-| 1 | Physics canvas + Matter.js engine | ✅ Done |
-| 2 | Constraints — springs, ropes, rods, pivots, motors | ✅ Done |
-| 3 | Real-time analytics dashboard | ✅ Done |
-| 4 | Save/load experiments with MongoDB | ✅ Done |
-| 5 | Multi-user collaboration with Socket.io | ✅ Done |
-| 6 | Experiment library, templates, polish | ✅ Done |
+| Phase | Feature |
+|-------|---------|
+| 1 | Physics canvas + Matter.js engine |
+| 2 | Constraints — springs, ropes, rods, pivots, motors |
+| 3 | Real-time analytics dashboard |
+| 4 | Save/load experiments with MongoDB |
+| 5 | Multi-user collaboration with Socket.io |
+| 6 | Experiment library, templates, polish |
 
