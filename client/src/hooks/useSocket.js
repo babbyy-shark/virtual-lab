@@ -13,11 +13,12 @@ export default function useSocket() {
   const onBodyAdded   = useRef(null)
   const onBodyRemoved = useRef(null)
   const onBodyMoved   = useRef(null)
+  const onConstraintAdded = useRef(null)
   const onClearAll    = useRef(null)
   const onRoomBodies  = useRef(null)
 
   useEffect(() => {
-    const socket = io('http://localhost:5000', {
+    const socket = io(import.meta.env.VITE_SOCKET_URL || window.location.origin, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -29,10 +30,10 @@ export default function useSocket() {
     socket.on('connect',    () => setConnected(true))
     socket.on('disconnect', () => { setConnected(false); setCursors({}) })
 
-    socket.on('room-joined', ({ you, state, bodies }) => {
+    socket.on('room-joined', ({ you, state, bodies, constraints }) => {
       setYou(you)
       setRoomState(state)
-      if (onRoomBodies.current && bodies?.length > 0) onRoomBodies.current(bodies)
+      if (onRoomBodies.current) onRoomBodies.current(bodies || [], constraints || [])
     })
 
     socket.on('user-left', ({ id }) => {
@@ -61,6 +62,7 @@ export default function useSocket() {
     socket.on('body-added',   ({ body })      => onBodyAdded.current?.(body))
     socket.on('body-removed', ({ networkId }) => onBodyRemoved.current?.(networkId))
     socket.on('body-moved',   (data)          => onBodyMoved.current?.(data))
+    socket.on('constraint-added', ({ constraint }) => onConstraintAdded.current?.(constraint))
     socket.on('clear-all',    ()              => onClearAll.current?.())
 
     socket.on('chat-message', (msg) => {
@@ -85,13 +87,14 @@ export default function useSocket() {
   const emitBodyAdded   = useCallback((roomId, body)                    => socketRef.current?.emit('body-added',   { roomId, body }), [])
   const emitBodyRemoved = useCallback((roomId, networkId)               => socketRef.current?.emit('body-removed', { roomId, networkId }), [])
   const emitBodyMoved   = useCallback((roomId, networkId, x, y, angle)  => socketRef.current?.emit('body-moved',   { roomId, networkId, x, y, angle }), [])
+  const emitConstraintAdded = useCallback((roomId, constraint)          => socketRef.current?.emit('constraint-added', { roomId, constraint }), [])
   const emitClearAll    = useCallback((roomId)                          => socketRef.current?.emit('clear-all',    { roomId }), [])
   const sendMessage     = useCallback((roomId, text)                    => socketRef.current?.emit('chat-message', { roomId, text }), [])
 
   return {
     connected, roomState, cursors, messages, you,
-    onBodyAdded, onBodyRemoved, onBodyMoved, onClearAll, onRoomBodies,
+    onBodyAdded, onBodyRemoved, onBodyMoved, onConstraintAdded, onClearAll, onRoomBodies,
     joinRoom, emitCursor, emitBodyAdded, emitBodyRemoved,
-    emitBodyMoved, emitClearAll, sendMessage,
+    emitBodyMoved, emitConstraintAdded, emitClearAll, sendMessage,
   }
 }

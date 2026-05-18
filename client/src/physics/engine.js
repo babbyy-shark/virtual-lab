@@ -117,4 +117,13 @@ export function queryBodyAtPoint(engine, point) {
   return Query.point(bodies, point)[0] || null
 }
 
+export function getNetworkId(body) {
+  return body?.plugin?.networkId ?? body?.id
+}
+
+export function findBodyByNetworkId(engine, networkId) {
+  if (!engine || networkId === undefined || networkId === null) return null
+  return Composite.allBodies(engine.world).find(b => String(getNetworkId(b)) === String(networkId)) || null
+}
+
 export { Engine, Render, Runner, World, Composite, Constraint, Events, Mouse, MouseConstraint, Body, Query }

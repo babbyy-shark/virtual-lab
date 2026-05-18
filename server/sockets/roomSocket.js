@@ -12,10 +12,11 @@ const USER_COLORS = [
 
 function getRoomState(roomId) {
   const room = rooms.get(roomId)
-  if (!room) return { users: [], bodyCount: 0 }
+  if (!room) return { users: [], bodyCount: 0, constraintCount: 0 }
   return {
     users:     Array.from(room.users.values()),
     bodyCount: room.bodies.size,
+    constraintCount: room.constraints?.size || 0,
   }
 }
 
@@ -46,7 +47,7 @@ export default function roomSocket(io) {
       currentRoom = roomId
 
       if (!rooms.has(roomId)) {
-        rooms.set(roomId, { users: new Map(), bodies: new Map() })
+        rooms.set(roomId, { users: new Map(), bodies: new Map(), constraints: new Map() })
       }
 
       const room  = rooms.get(roomId)
@@ -65,6 +66,7 @@ export default function roomSocket(io) {
         you:    user,
         state:  getRoomState(roomId),
         bodies: Array.from(room.bodies.values()),
+        constraints: Array.from(room.constraints.values()),
       })
 
       socket.to(roomId).emit('user-joined', user)
@@ -73,33 +75,54 @@ export default function roomSocket(io) {
       console.log(`👤 ${user.name} joined room ${roomId} (${room.users.size} users)`)
     })
 
-    // 🐛 BUG: cursor-move broadcasts to ALL including sender
-    // causes sender's own cursor to flicker/echo back
-    // Fix: change io.to() to socket.to() to exclude sender
     socket.on('cursor-move', ({ roomId, x, y }) => {
       const room = rooms.get(roomId)
       if (!room) return
       const user = room.users.get(socket.id)
       if (user) user.cursor = { x, y }
-      io.to(roomId).emit('cursor-move', { id: socket.id, x, y })
+      socket.to(roomId).emit('cursor-move', { id: socket.id, x, y })
     })
 
     socket.on('body-added', ({ roomId, body }) => {
       const room = rooms.get(roomId)
       if (!room) return
+      if (!body.networkId) body.networkId = `${socket.id}-${Date.now()}`
       room.bodies.set(body.networkId, body)
       socket.to(roomId).emit('body-added', { body, senderId: socket.id })
+      io.to(roomId).emit('room-state', getRoomState(roomId))
     })
 
     socket.on('body-removed', ({ roomId, networkId }) => {
       const room = rooms.get(roomId)
       if (!room) return
       room.bodies.delete(networkId)
+      for (const [id, constraint] of room.constraints.entries()) {
+        if (constraint.bodyANetworkId === networkId || constraint.bodyBNetworkId === networkId) {
+          room.constraints.delete(id)
+        }
+      }
       socket.to(roomId).emit('body-removed', { networkId })
+      io.to(roomId).emit('room-state', getRoomState(roomId))
     })
 
     socket.on('body-moved', ({ roomId, networkId, x, y, angle }) => {
+      const room = rooms.get(roomId)
+      const body = room?.bodies.get(networkId)
+      if (body) {
+        body.x = x
+        body.y = y
+        body.angle = angle
+      }
       socket.to(roomId).emit('body-moved', { networkId, x, y, angle })
+    })
+
+    socket.on('constraint-added', ({ roomId, constraint }) => {
+      const room = rooms.get(roomId)
+      if (!room) return
+      if (!constraint.networkId) constraint.networkId = `${socket.id}-constraint-${Date.now()}`
+      room.constraints.set(constraint.networkId, constraint)
+      socket.to(roomId).emit('constraint-added', { constraint, senderId: socket.id })
+      io.to(roomId).emit('room-state', getRoomState(roomId))
     })
 
     socket.on('chat-message', ({ roomId, text }) => {
@@ -118,7 +141,9 @@ export default function roomSocket(io) {
       const room = rooms.get(roomId)
       if (!room) return
       room.bodies.clear()
+      room.constraints.clear()
       socket.to(roomId).emit('clear-all')
+      io.to(roomId).emit('room-state', getRoomState(roomId))
     })
 
     socket.on('disconnect', () => {

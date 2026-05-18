@@ -1,59 +1,78 @@
-/**
- * components/SaveLoadPanel.jsx
- * Phase 4 — Save & Load experiments
- *
- * 🐛 BUG 2: No loading/saving state tracked.
- * If user clicks Save twice quickly:
- * - Two POST requests fire simultaneously
- * - DB gets two identical experiments
- * Fix: disable button while request is in flight
- */
 import { useState, useEffect } from 'react'
-import { getExperiments, saveExperiment, deleteExperiment } from '../utils/api.js'
+import { getExperiments, deleteExperiment } from '../utils/api.js'
 
 export default function SaveLoadPanel({ onSave, onLoad, onDelete }) {
   const [experiments, setExperiments] = useState([])
   const [name,        setName]        = useState('')
   const [desc,        setDesc]        = useState('')
-  // 🐛 BUG 2: No `saving` or `loading` boolean state here
-  // So button is never disabled during the request
+  const [loading,     setLoading]     = useState(false)
+  const [saving,      setSaving]      = useState(false)
+  const [busyId,      setBusyId]      = useState(null)
+  const [error,       setError]       = useState('')
 
-  // Load list on mount
   useEffect(() => {
     fetchList()
   }, [])
 
   async function fetchList() {
-    // 🐛 BUG 3: No try/catch — silent failure if server is down
-    const data = await getExperiments()
-    setExperiments(data || [])
+    setLoading(true)
+    setError('')
+    try {
+      const data = await getExperiments()
+      setExperiments(data || [])
+    } catch (err) {
+      setError(err.message || 'Unable to load experiments')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleSave() {
-    if (!name.trim()) return
-    // 🐛 BUG 2: No guard here — clicking Save twice fires 2 requests
-    // 🐛 BUG 3: No try/catch
-    await onSave(name, desc)
-    setName('')
-    setDesc('')
-    fetchList() // refresh list
+    if (!name.trim() || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(name.trim(), desc.trim())
+      setName('')
+      setDesc('')
+      await fetchList()
+    } catch (err) {
+      setError(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handleLoad(id) {
-    // 🐛 BUG 4: Race condition — we call onLoad immediately
-    // but onLoad calls clearAll + addBody in sequence.
-    // If clearAll hasn't finished processing before addBody runs,
-    // old bodies can remain and new ones stack on top.
-    // Fix: await clearAll properly or add a small defer.
-    await onLoad(id)
-    fetchList()
+    if (busyId) return
+    setBusyId(id)
+    setError('')
+    try {
+      await onLoad(id)
+      await fetchList()
+    } catch (err) {
+      setError(err.message || 'Load failed')
+    } finally {
+      setBusyId(null)
+    }
   }
 
   async function handleDelete(id) {
-    await deleteExperiment(id)
-    onDelete && onDelete(id)
-    fetchList()
+    if (busyId) return
+    setBusyId(id)
+    setError('')
+    try {
+      await deleteExperiment(id)
+      onDelete && onDelete(id)
+      await fetchList()
+    } catch (err) {
+      setError(err.message || 'Delete failed')
+    } finally {
+      setBusyId(null)
+    }
   }
+
+  const canSave = name.trim() && !saving
 
   return (
     <div style={{
@@ -63,10 +82,9 @@ export default function SaveLoadPanel({ onSave, onLoad, onDelete }) {
       overflowY: 'auto',
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#00e5a0', letterSpacing: 2 }}>
-        💾 SAVE / LOAD
+        SAVE / LOAD
       </div>
 
-      {/* Save form */}
       <div style={{
         padding: 10, background: '#0a0a0f', borderRadius: 8,
         border: '1px solid #2a2a3a', display: 'flex', flexDirection: 'column', gap: 6,
@@ -94,28 +112,42 @@ export default function SaveLoadPanel({ onSave, onLoad, onDelete }) {
             fontFamily: 'JetBrains Mono', outline: 'none', width: '100%',
           }}
         />
-        {/* 🐛 BUG 2: button is never disabled — double-click = duplicate saves */}
         <button
           onClick={handleSave}
-          disabled={!name.trim()}
+          disabled={!canSave}
           style={{
-            padding: '6px 0', background: name.trim() ? '#00e5a020' : 'transparent',
-            border: `1px solid ${name.trim() ? '#00e5a0' : '#2a2a3a'}`,
-            borderRadius: 4, color: name.trim() ? '#00e5a0' : '#55556a',
-            cursor: name.trim() ? 'pointer' : 'not-allowed',
+            padding: '6px 0', background: canSave ? '#00e5a020' : 'transparent',
+            border: `1px solid ${canSave ? '#00e5a0' : '#2a2a3a'}`,
+            borderRadius: 4, color: canSave ? '#00e5a0' : '#55556a',
+            cursor: canSave ? 'pointer' : 'not-allowed',
             fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 10,
           }}
         >
-          💾 SAVE EXPERIMENT
+          {saving ? 'SAVING...' : 'SAVE EXPERIMENT'}
         </button>
       </div>
 
-      {/* Saved experiments list */}
+      {error && (
+        <div style={{
+          padding: 8, background: '#ff446615', border: '1px solid #ff446650',
+          borderRadius: 6, color: '#ff4466', lineHeight: 1.5,
+        }}>
+          {error}
+        </div>
+      )}
+
       <div style={{ fontSize: 9, fontWeight: 700, color: '#8888a0', letterSpacing: 2 }}>
         SAVED EXPERIMENTS ({experiments.length})
       </div>
 
-      {experiments.length === 0 ? (
+      {loading ? (
+        <div style={{
+          padding: 10, background: '#0a0a0f', borderRadius: 8,
+          border: '1px solid #2a2a3a', color: '#8888a0',
+        }}>
+          Loading...
+        </div>
+      ) : experiments.length === 0 ? (
         <div style={{
           padding: 10, background: '#0a0a0f', borderRadius: 8,
           border: '1px solid #2a2a3a', color: '#55556a', lineHeight: 1.6,
@@ -138,25 +170,29 @@ export default function SaveLoadPanel({ onSave, onLoad, onDelete }) {
             <div style={{ display: 'flex', gap: 6 }}>
               <button
                 onClick={() => handleLoad(exp._id)}
+                disabled={!!busyId}
                 style={{
                   flex: 1, padding: '4px 0', background: '#4488ff15',
                   border: '1px solid #4488ff', borderRadius: 4,
-                  color: '#4488ff', cursor: 'pointer',
+                  color: '#4488ff', cursor: busyId ? 'not-allowed' : 'pointer',
                   fontFamily: 'JetBrains Mono', fontSize: 9, fontWeight: 700,
+                  opacity: busyId && busyId !== exp._id ? 0.5 : 1,
                 }}
               >
-                ▶ LOAD
+                {busyId === exp._id ? '...' : 'LOAD'}
               </button>
               <button
                 onClick={() => handleDelete(exp._id)}
+                disabled={!!busyId}
                 style={{
                   padding: '4px 8px', background: '#ff446615',
                   border: '1px solid #ff4466', borderRadius: 4,
-                  color: '#ff4466', cursor: 'pointer',
+                  color: '#ff4466', cursor: busyId ? 'not-allowed' : 'pointer',
                   fontFamily: 'JetBrains Mono', fontSize: 9, fontWeight: 700,
+                  opacity: busyId && busyId !== exp._id ? 0.5 : 1,
                 }}
               >
-                ✕
+                X
               </button>
             </div>
           </div>

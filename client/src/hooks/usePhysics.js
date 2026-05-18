@@ -6,6 +6,7 @@ import {
   createConstraint as _createConstraint,
   startMotor, stopMotor, isMotorRunning,
   setGravity, getBodyKE, getBodyPE, queryBodyAtPoint,
+  findBodyByNetworkId, getNetworkId,
 } from '../physics/engine.js'
 
 const { Render, Runner, World, Composite, Events, Mouse, MouseConstraint, Body } = Matter
@@ -127,9 +128,14 @@ export default function usePhysics(canvasRef, containerRef) {
     })
   }
 
-  const addBody = useCallback((type, x, y, material, isStatic) => {
+  const addBody = useCallback((type, x, y, material, isStatic, options = {}) => {
     if (!engineRef.current) return null
     const body = _createBody(type, x, y, material, isStatic)
+    body.plugin = {
+      ...body.plugin,
+      networkId: options.networkId ?? getNetworkId(body),
+    }
+    if (typeof options.angle === 'number') Body.setAngle(body, options.angle)
     World.add(engineRef.current.world, body)
     return body
   }, [])
@@ -141,12 +147,26 @@ export default function usePhysics(canvasRef, containerRef) {
     setSelectedBody(null)
   }, [])
 
+  const removeBodyByNetworkId = useCallback((networkId) => {
+    if (!engineRef.current) return
+    const body = findBodyByNetworkId(engineRef.current, networkId)
+    if (!body) return
+    stopMotor(body)
+    removeAllConstraintsForBody(body)
+    World.remove(engineRef.current.world, body)
+    setSelectedBody(current => getNetworkId(current) === getNetworkId(body) ? null : current)
+  }, [])
+
   const clearAll = useCallback(() => {
     if (!engineRef.current) return
     const bodies      = Composite.allBodies(engineRef.current.world).filter(b => !b.isStatic)
+    const staticBodies = Composite.allBodies(engineRef.current.world)
+      .filter(b => b.isStatic && !['ground', 'wall-left', 'wall-right'].includes(b.label))
     const constraints = Composite.allConstraints(engineRef.current.world)
+      .filter(c => c.label !== 'Mouse Constraint')
     bodies.forEach(stopMotor)
     World.remove(engineRef.current.world, bodies)
+    World.remove(engineRef.current.world, staticBodies)
     World.remove(engineRef.current.world, constraints)
     setSelectedBody(null)
     setBodyCount(0)
@@ -154,9 +174,14 @@ export default function usePhysics(canvasRef, containerRef) {
     setLiveBodies([])
   }, [])
 
-  const addConstraint = useCallback((type, bodyA, bodyB = null, pointB = null) => {
+  const addConstraint = useCallback((type, bodyA, bodyB = null, pointB = null, options = {}) => {
     if (!engineRef.current || !bodyA) return null
     const c = _createConstraint(type, bodyA, bodyB, pointB)
+    if (typeof options.length === 'number') c.length = options.length
+    c.plugin = {
+      ...c.plugin,
+      networkId: options.networkId ?? `${getNetworkId(bodyA)}-${getNetworkId(bodyB) || 'point'}-${Date.now()}`,
+    }
     World.add(engineRef.current.world, c)
     return c
   }, [])
@@ -169,9 +194,24 @@ export default function usePhysics(canvasRef, containerRef) {
   const removeAllConstraintsForBody = useCallback((body) => {
     if (!engineRef.current || !body) return
     Composite.allConstraints(engineRef.current.world)
+      .filter(c => c.label !== 'Mouse Constraint')
       .filter(c => c.bodyA?.id === body.id || c.bodyB?.id === body.id)
       .forEach(c => World.remove(engineRef.current.world, c))
   }, [])
+
+  const addConstraintByNetworkIds = useCallback((constraint) => {
+    if (!engineRef.current || !constraint) return null
+    const bodyA = findBodyByNetworkId(engineRef.current, constraint.bodyANetworkId)
+    const bodyB = constraint.bodyBNetworkId
+      ? findBodyByNetworkId(engineRef.current, constraint.bodyBNetworkId)
+      : null
+    const pointB = constraint.pointB || null
+    if (!bodyA) return null
+    return addConstraint(constraint.type, bodyA, bodyB, pointB, {
+      length: constraint.length,
+      networkId: constraint.networkId,
+    })
+  }, [addConstraint])
 
   const toggleMotor = useCallback((body, speed = 0.06) => {
     if (!body) return
@@ -204,13 +244,26 @@ export default function usePhysics(canvasRef, containerRef) {
       })
   }, [])
 
+  const moveBodyByNetworkId = useCallback((networkId, x, y, angle) => {
+    if (!engineRef.current) return
+    const body = findBodyByNetworkId(engineRef.current, networkId)
+    if (!body) return
+    Body.setPosition(body, { x, y })
+    if (typeof angle === 'number') Body.setAngle(body, angle)
+    Body.setVelocity(body, { x: 0, y: 0 })
+    Body.setAngularVelocity(body, 0)
+  }, [])
+
+  const getNetworkIdForBody = useCallback((body) => getNetworkId(body), [])
+
   return {
     ready, engineRef, renderRef, bodyCount,
     selectedBody, setSelectedBody,
     analyticsData, liveBodies,
-    addBody, removeBody, clearAll,
-    addConstraint, removeConstraint, removeAllConstraintsForBody,
+    addBody, removeBody, removeBodyByNetworkId, clearAll,
+    addConstraint, addConstraintByNetworkIds, removeConstraint, removeAllConstraintsForBody,
     toggleMotor, getBodyAtPoint,
+    moveBodyByNetworkId, getNetworkIdForBody,
     setRunning, updateGravity, resetVelocities,
   }
 }

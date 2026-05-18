@@ -1,7 +1,15 @@
 import { Router } from 'express'
+import mongoose from 'mongoose'
 import Experiment from '../models/Experiment.js'
 
 const router = Router()
+
+router.use((req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database unavailable' })
+  }
+  next()
+})
 
 router.get('/', async (req, res) => {
   try {
@@ -14,6 +22,9 @@ router.get('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid experiment id' })
+    }
     const exp = await Experiment.findById(req.params.id)
     if (!exp) return res.status(404).json({ error: 'Not found' })
     res.json(exp)
@@ -34,7 +45,11 @@ router.post('/', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    await Experiment.findByIdAndDelete(req.params.id)
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid experiment id' })
+    }
+    const exp = await Experiment.findByIdAndDelete(req.params.id)
+    if (!exp) return res.status(404).json({ error: 'Not found' })
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

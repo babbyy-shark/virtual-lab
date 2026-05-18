@@ -29,17 +29,18 @@ export default function LabPage() {
     selectedBody, setSelectedBody,
     analyticsData, liveBodies,
     engineRef,
-    addBody, removeBody, clearAll,
-    addConstraint, removeAllConstraintsForBody,
+    addBody, removeBody, removeBodyByNetworkId, clearAll,
+    addConstraint, addConstraintByNetworkIds, removeAllConstraintsForBody,
     toggleMotor, getBodyAtPoint,
+    moveBodyByNetworkId, getNetworkIdForBody,
     setRunning, updateGravity, resetVelocities,
   } = usePhysics(canvasRef, containerRef)
 
   const {
     connected, roomState, cursors, messages, you,
-    onBodyAdded, onBodyRemoved, onClearAll, onRoomBodies,
+    onBodyAdded, onBodyRemoved, onBodyMoved, onConstraintAdded, onClearAll, onRoomBodies,
     joinRoom, emitCursor, emitBodyAdded, emitBodyRemoved,
-    emitClearAll, sendMessage,
+    emitBodyMoved, emitConstraintAdded, emitClearAll, sendMessage,
   } = useSocket()
 
   const [playing,            setPlaying]            = useState(false)
@@ -65,10 +66,23 @@ export default function LabPage() {
 
   // Register socket → physics callbacks
   useEffect(() => {
-    onBodyAdded.current   = (body) => addBody(body.type, body.x, body.y, body.material, body.isStatic)
+    onBodyAdded.current   = (body) => addBody(body.type, body.x, body.y, body.material, body.isStatic, {
+      networkId: body.networkId,
+      angle: body.angle,
+    })
+    onBodyRemoved.current = (networkId) => removeBodyByNetworkId(networkId)
+    onBodyMoved.current   = ({ networkId, x, y, angle }) => moveBodyByNetworkId(networkId, x, y, angle)
+    onConstraintAdded.current = (constraint) => addConstraintByNetworkIds(constraint)
     onClearAll.current    = () => clearAll()
-    onRoomBodies.current  = (bodies) => bodies.forEach(b => addBody(b.type, b.x, b.y, b.material, b.isStatic))
-  }, [addBody, clearAll])
+    onRoomBodies.current  = (bodies, constraints) => {
+      clearAll()
+      bodies.forEach(b => addBody(b.type, b.x, b.y, b.material, b.isStatic, {
+        networkId: b.networkId,
+        angle: b.angle,
+      }))
+      constraints.forEach(c => addConstraintByNetworkIds(c))
+    }
+  }, [addBody, addConstraintByNetworkIds, clearAll, moveBodyByNetworkId, removeBodyByNetworkId])
 
   // Load template or saved experiment passed via navigation state
   useEffect(() => {
@@ -79,8 +93,10 @@ export default function LabPage() {
     if (state.template) {
       const t = state.template
       clearAll()
+      emitClearAll(activeRoomId)
       setTimeout(() => {
-        deserializeWorld(t, addBody, addConstraint)
+        const createdBodies = deserializeWorld(t, addBody, addConstraint) || []
+        broadcastWorld(createdBodies, t)
         setGravity(t.gravity || 1)
         showToast(`📐 Loaded template: ${t.name}`)
       }, 100)
@@ -101,6 +117,46 @@ export default function LabPage() {
     emitCursor(activeRoomId, e.clientX - rect.left, e.clientY - rect.top)
   }, [activeRoomId, emitCursor])
 
+  const broadcastConstraint = useCallback((constraint, bodyA, bodyB = null, pointB = null) => {
+    if (!constraint || !bodyA) return
+    emitConstraintAdded(activeRoomId, {
+      networkId: constraint.plugin?.networkId,
+      type: constraint.plugin?.constraintType || selectedConstraint,
+      bodyANetworkId: getNetworkIdForBody(bodyA),
+      bodyBNetworkId: bodyB ? getNetworkIdForBody(bodyB) : null,
+      pointB: bodyB ? null : pointB,
+      length: constraint.length,
+    })
+  }, [activeRoomId, emitConstraintAdded, getNetworkIdForBody, selectedConstraint])
+
+  const broadcastWorld = useCallback((createdBodies, source) => {
+    createdBodies.forEach(body => {
+      emitBodyAdded(activeRoomId, {
+        networkId: getNetworkIdForBody(body),
+        type: body.plugin?.type || 'box',
+        x: body.position.x,
+        y: body.position.y,
+        material: body.plugin?.material || 'steel',
+        isStatic: body.isStatic,
+        angle: body.angle,
+      })
+    })
+
+    ;(source.constraints || []).forEach(c => {
+      const bodyA = createdBodies[c.bodyAIndex]
+      const bodyB = c.bodyBIndex >= 0 ? createdBodies[c.bodyBIndex] : null
+      if (!bodyA) return
+      emitConstraintAdded(activeRoomId, {
+        networkId: `${getNetworkIdForBody(bodyA)}-${bodyB ? getNetworkIdForBody(bodyB) : 'point'}-${Date.now()}`,
+        type: c.type,
+        bodyANetworkId: getNetworkIdForBody(bodyA),
+        bodyBNetworkId: bodyB ? getNetworkIdForBody(bodyB) : null,
+        pointB: bodyB ? null : { x: c.pointBx, y: c.pointBy },
+        length: c.length,
+      })
+    })
+  }, [activeRoomId, emitBodyAdded, emitConstraintAdded, getNetworkIdForBody])
+
   // ── Canvas click ──────────────────────────────────────────────────────────
   const handleCanvasClick = useCallback((e) => {
     if (!ready) return
@@ -115,9 +171,10 @@ export default function LabPage() {
       if (newBody) {
         setSelectedBody(newBody)
         emitBodyAdded(activeRoomId, {
-          networkId: newBody.id, type: selectedShape,
+          networkId: getNetworkIdForBody(newBody), type: selectedShape,
           x: pos.x, y: pos.y, material: selectedMaterial,
           isStatic: isStatic || selectedShape === 'wall',
+          angle: newBody.angle,
         })
       }
       return
@@ -130,9 +187,17 @@ export default function LabPage() {
         return
       }
       if (clicked && clicked.id === connectingFrom.id) { setConnectingFrom(null); return }
-      if (selectedConstraint === 'pivot') addConstraint('pivot', connectingFrom, null, pos)
-      else if (clicked) addConstraint(selectedConstraint, connectingFrom, clicked)
-      else addConstraint(selectedConstraint, connectingFrom, null, pos)
+      let constraint = null
+      if (selectedConstraint === 'pivot') {
+        constraint = addConstraint('pivot', connectingFrom, null, pos)
+        broadcastConstraint(constraint, connectingFrom, null, pos)
+      } else if (clicked) {
+        constraint = addConstraint(selectedConstraint, connectingFrom, clicked)
+        broadcastConstraint(constraint, connectingFrom, clicked)
+      } else {
+        constraint = addConstraint(selectedConstraint, connectingFrom, null, pos)
+        broadcastConstraint(constraint, connectingFrom, null, pos)
+      }
       setConnectingFrom(null)
       setSelectedBody(clicked || null)
       return
@@ -149,7 +214,7 @@ export default function LabPage() {
       if (clicked) {
         removeAllConstraintsForBody(clicked)
         removeBody(clicked)
-        emitBodyRemoved(activeRoomId, clicked.id)
+        emitBodyRemoved(activeRoomId, getNetworkIdForBody(clicked))
       }
       return
     }
@@ -158,8 +223,19 @@ export default function LabPage() {
     selectedConstraint, connectingFrom, activeRoomId,
     addBody, addConstraint, removeBody, removeAllConstraintsForBody,
     toggleMotor, getBodyAtPoint, setSelectedBody,
-    emitBodyAdded, emitBodyRemoved,
+    broadcastConstraint, emitBodyAdded, emitBodyRemoved, getNetworkIdForBody,
   ])
+
+  const handleCanvasMouseUp = useCallback(() => {
+    if (!selectedBody) return
+    emitBodyMoved(
+      activeRoomId,
+      getNetworkIdForBody(selectedBody),
+      selectedBody.position.x,
+      selectedBody.position.y,
+      selectedBody.angle,
+    )
+  }, [activeRoomId, emitBodyMoved, getNetworkIdForBody, selectedBody])
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async (name, desc) => {
@@ -170,6 +246,7 @@ export default function LabPage() {
       showToast(`✅ Saved "${name}"`)
     } catch (err) {
       showToast('❌ Save failed — is the server running?', 'error')
+      throw err
     }
   }, [engineRef, gravity])
 
@@ -183,13 +260,15 @@ export default function LabPage() {
       emitClearAll(activeRoomId)
       setGravity(exp.gravity || 1)
       setTimeout(() => {
-        deserializeWorld(exp, addBody, addConstraint)
+        const createdBodies = deserializeWorld(exp, addBody, addConstraint) || []
+        broadcastWorld(createdBodies, exp)
         showToast(`📂 Loaded "${exp.name}"`)
       }, 50)
     } catch (err) {
       showToast('❌ Load failed — is the server running?', 'error')
+      throw err
     }
-  }, [engineRef, clearAll, addBody, addConstraint, activeRoomId, emitClearAll])
+  }, [engineRef, clearAll, addBody, addConstraint, activeRoomId, emitClearAll, broadcastWorld])
 
   // ── Clear ─────────────────────────────────────────────────────────────────
   const handleClear = useCallback(() => {
@@ -206,12 +285,12 @@ export default function LabPage() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBody) {
         removeAllConstraintsForBody(selectedBody)
         removeBody(selectedBody)
-        emitBodyRemoved(activeRoomId, selectedBody.id)
+        emitBodyRemoved(activeRoomId, getNetworkIdForBody(selectedBody))
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedBody, removeBody, removeAllConstraintsForBody, activeRoomId, emitBodyRemoved])
+  }, [selectedBody, removeBody, removeAllConstraintsForBody, activeRoomId, emitBodyRemoved, getNetworkIdForBody])
 
   const cursorStyle = {
     place: 'crosshair', connect: connectingFrom ? 'cell' : 'crosshair',
@@ -309,6 +388,7 @@ export default function LabPage() {
           style={{ cursor: cursorStyle }}
           onClick={handleCanvasClick}
           onMouseMove={handleMouseMove}
+          onMouseUp={handleCanvasMouseUp}
         >
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
           <LiveCursors cursors={cursors} you={you} />

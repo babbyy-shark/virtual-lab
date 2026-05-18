@@ -27,10 +27,10 @@ const MONGO_URI = process.env.MONGO_URI|| 'mongodb://localhost:27017/virtuallab'
 
 mongoose.connect(MONGO_URI)
   .then(() => {
-    console.log('✅ MongoDB connected')
-    httpServer.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`))
+    console.log('MongoDB connected')
+    httpServer.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`))
   })
   .catch(err => {
-    console.warn('⚠️  MongoDB not connected (offline mode):', err.message)
-    httpServer.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT} (no DB)`))
+    console.warn('MongoDB not connected (offline mode):', err.message)
+    httpServer.listen(PORT, () => console.log(`Server running on http://localhost:${PORT} (no DB)`))
   })

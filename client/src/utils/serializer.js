@@ -2,10 +2,17 @@ import Matter from 'matter-js'
 
 const { Composite } = Matter
 
-export function serializeWorld(engine, gravity = 1) {
-  const dynamicBodies = Composite.allBodies(engine.world).filter(b => !b.isStatic)
+const WORLD_BOUNDARY_LABELS = new Set(['ground', 'wall-left', 'wall-right'])
 
-  const bodies = dynamicBodies.map(b => ({
+function isSerializableBody(body) {
+  return !WORLD_BOUNDARY_LABELS.has(body.label)
+}
+
+export function serializeWorld(engine, gravity = 1) {
+  const serializableBodies = Composite.allBodies(engine.world).filter(isSerializableBody)
+
+  const bodies = serializableBodies.map(b => ({
+    networkId: b.plugin?.networkId ?? b.id,
     type:     b.plugin?.type     || 'box',
     material: b.plugin?.material || 'steel',
     x:        b.position.x,
@@ -14,14 +21,17 @@ export function serializeWorld(engine, gravity = 1) {
     isStatic: b.isStatic,
   }))
 
-  const constraints = Composite.allConstraints(engine.world).map(c => ({
+  const constraints = Composite.allConstraints(engine.world)
+    .filter(c => c.label !== 'Mouse Constraint')
+    .map(c => ({
     type:       c.plugin?.constraintType || 'spring',
-    bodyAIndex: dynamicBodies.findIndex(b => b.id === c.bodyA?.id),
-    bodyBIndex: c.bodyB ? dynamicBodies.findIndex(b => b.id === c.bodyB?.id) : -1,
+    bodyAIndex: serializableBodies.findIndex(b => b.id === c.bodyA?.id),
+    bodyBIndex: c.bodyB ? serializableBodies.findIndex(b => b.id === c.bodyB?.id) : -1,
     pointBx:    c.pointB?.x ?? null,
     pointBy:    c.pointB?.y ?? null,
     length:     c.length,
   }))
+    .filter(c => c.bodyAIndex >= 0)
 
   return { bodies, constraints, gravity }
 }
@@ -31,7 +41,10 @@ export function deserializeWorld(data, addBody, addConstraint) {
   const createdBodies = []
 
   for (const b of data.bodies) {
-    const body = addBody(b.type, b.x, b.y, b.material, b.isStatic)
+    const body = addBody(b.type, b.x, b.y, b.material, b.isStatic, {
+      networkId: b.networkId,
+      angle: b.angle,
+    })
     if (body) createdBodies.push(body)
   }
 
@@ -39,6 +52,8 @@ export function deserializeWorld(data, addBody, addConstraint) {
     const bodyA  = createdBodies[c.bodyAIndex]
     const bodyB  = c.bodyBIndex >= 0 ? createdBodies[c.bodyBIndex] : null
     const pointB = c.pointBx !== null ? { x: c.pointBx, y: c.pointBy } : null
-    if (bodyA) addConstraint(c.type, bodyA, bodyB, pointB)
+    if (bodyA) addConstraint(c.type, bodyA, bodyB, pointB, { length: c.length })
   }
+
+  return createdBodies
 }
